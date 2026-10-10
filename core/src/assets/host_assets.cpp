@@ -53,7 +53,7 @@ std::uint64_t HostAssets::require_asset(std::uint32_t handle) const {
 
 std::uint32_t HostAssets::asset_buffer(std::uint64_t asset) {
     const auto cached = asset_buffers_.find(asset);
-    if (cached != asset_buffers_.end()) return cached->second;
+    if (cached != asset_buffers_.end()) return cached->second.address;
 
     const std::int64_t length = backend_.length(asset);
     const void* host = backend_.buffer(asset);
@@ -81,9 +81,22 @@ std::uint32_t HostAssets::asset_buffer(std::uint64_t asset) {
         return 0;
     }
     std::memcpy(destination, host, size);
-    asset_buffers_.emplace(asset, allocated->r0);
+    asset_buffers_.emplace(asset, AssetBuffer{allocated->r0, size});
     buffered_bytes_ += size;
     return allocated->r0;
+}
+
+void HostAssets::release_asset_buffer(std::uint64_t asset) {
+    const auto it = asset_buffers_.find(asset);
+    if (it == asset_buffers_.end()) return;
+    const AssetBuffer buffer = it->second;
+    asset_buffers_.erase(it);
+    buffered_bytes_ -= buffer.size;
+    GuestCall args;
+    args.regs = {buffer.address, 0, 0, 0};
+    if (!runtime_.call_on_current(runtime_.service_api().free_fn, args)) {
+        log("AAsset_close: the guest allocator could not free an asset buffer");
+    }
 }
 
 bool HostAssets::handle_host_call(std::uint32_t index, GuestThread& thread) {
@@ -110,7 +123,10 @@ bool HostAssets::handle_host_call(std::uint32_t index, GuestThread& thread) {
     }
     case ZB_ASSET_HC_AAsset_close: {
         const std::optional<std::uint64_t> asset = assets_.remove(regs[0]);
-        if (asset && *asset != 0) backend_.close(*asset);
+        if (asset && *asset != 0) {
+            release_asset_buffer(*asset);
+            backend_.close(*asset);
+        }
         regs[0] = 0;
         return true;
     }

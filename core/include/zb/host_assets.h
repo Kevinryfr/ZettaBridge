@@ -48,12 +48,20 @@ private:
     // AAsset_getBuffer copies, since the NDK buffer lives outside the guest address space. An
     // asset is read-only, so one copy per asset is enough and never needs writing back.
     std::uint32_t asset_buffer(std::uint64_t asset);
+    // Frees the guest copy when the asset closes: the host asset pointer can be reused by the
+    // next open, and a copy that outlived its asset would be handed to an unrelated file.
+    void release_asset_buffer(std::uint64_t asset);
 
     GlobalHandles managers_{HandleKind::Global};
     GlobalHandles assets_{HandleKind::Global};
     bool logged_overflow_ = false;
-    static constexpr std::uint64_t kMaxBufferedBytes = 64ull << 20;
-    std::unordered_map<std::uint64_t, std::uint32_t> asset_buffers_;
+    // Bytes held by buffers of assets that are still open.
+    static constexpr std::uint64_t kMaxBufferedBytes = 512ull << 20;
+    struct AssetBuffer {
+        std::uint32_t address;
+        std::uint64_t size;
+    };
+    std::unordered_map<std::uint64_t, AssetBuffer> asset_buffers_;
     std::uint64_t buffered_bytes_ = 0;
 };
 
