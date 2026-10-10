@@ -36,10 +36,12 @@ void AndroidLooperDriverBackend::release(std::uint64_t looper) {
 
 int AndroidLooperDriverBackend::add_fd(std::uint64_t looper, int fd, int ident, int events,
                                        Callback callback, void* data) {
-    if (looper == 0 || callback == nullptr) return -1;
-    // The guest's identifier is meaningless here: nothing polls this looper for us, so the fd is
-    // always registered with a callback, and ALooper requires ALOOPER_POLL_CALLBACK for those.
-    (void)ident;
+    if (looper == 0) return -1;
+    // Without a callback this is a guest ident registration on a looper the guest polls itself:
+    // pollOnce hands back the ident and data. ALooper accepts that only on a looper prepared with
+    // ALOOPER_PREPARE_ALLOW_NON_CALLBACKS, which the guest asked for if it registers this way.
+    if (callback == nullptr) return ident >= 0 ? ALooper_addFd(L(looper), fd, ident, events, nullptr, data) : -1;
+    // With a callback the identifier is meaningless: ALooper requires ALOOPER_POLL_CALLBACK.
     return ALooper_addFd(L(looper), fd, ALOOPER_POLL_CALLBACK, events, callback, data);
 }
 
