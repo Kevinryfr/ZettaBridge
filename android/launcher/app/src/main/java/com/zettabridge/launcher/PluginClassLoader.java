@@ -31,6 +31,16 @@ final class PluginClassLoader extends DexClassLoader {
                 || name.startsWith("dalvik.") || name.startsWith("sun.");
     }
 
+    /**
+     * Classes of platform shared libraries the launcher declares with uses-library. Android puts
+     * org.apache.http.legacy on the class path of every app targeting SDK 27 or lower, so plugins
+     * of that era use it without declaring it; it lives on the launcher's loader, not the boot one.
+     */
+    private static boolean sharedLibraryClass(String name) {
+        return name.startsWith("org.apache.http.") || name.startsWith("org.apache.commons.logging.")
+                || name.startsWith("android.net.http.");
+    }
+
     @Override
     protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
         synchronized (this) {
@@ -44,7 +54,12 @@ final class PluginClassLoader extends DexClassLoader {
                     try {
                         loaded = findClass(name);
                     } catch (ClassNotFoundException missing) {
-                        loaded = super.loadClass(name, false);
+                        try {
+                            loaded = super.loadClass(name, false);
+                        } catch (ClassNotFoundException notBoot) {
+                            if (!sharedLibraryClass(name)) throw notBoot;
+                            loaded = PluginClassLoader.class.getClassLoader().loadClass(name);
+                        }
                     }
                 }
             }
